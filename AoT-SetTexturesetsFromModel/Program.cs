@@ -6,6 +6,7 @@ using Mutagen.Bethesda.Plugins;
 
 using Mutagen.Bethesda.Archives;
 using Noggog;
+using System;
 
 namespace AoTSetTexturesetsFromModel
 {
@@ -170,7 +171,7 @@ namespace AoTSetTexturesetsFromModel
             {"textures\\weapons\\wooden\\bow.dds", "300MaterialBasicBowTS"},
             {"textures\\weapons\\300daedric\\akivirigreatsword.dds", "300MaterialAkavirGreatswordTS"},
             {"textures\\weapons\\300iron\\basicscabbard.dds", "300MaterialBasicScabbardTS"},
-                      
+
             {"textures\\armor\\blades\\bladesarmor.dds", "300ArmorMaterialBladesCuirassTS"},
             {"textures\\armor\\blades\\bladesboots.dds", "300ArmorMaterialBladesBootsTS"},
             {"textures\\armor\\blades\\bladeshelmet.dds", "300ArmorMaterialBladesHelmetTS"},
@@ -416,8 +417,9 @@ namespace AoTSetTexturesetsFromModel
         public static bool TryGetFileFromArchive(List<IArchiveReader> archives, string path, out NifFile niffile)
         {
             niffile = new();
-            foreach (var archive in archives) {
-                foreach(var file in archive.Files)
+            foreach (var archive in archives)
+            {
+                foreach (var file in archive.Files)
                 {
                     if (file.Path.Equals(path, StringComparison.OrdinalIgnoreCase))
                     {
@@ -454,6 +456,10 @@ namespace AoTSetTexturesetsFromModel
         public static void RunPatch(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
         {
             //Your code here!
+
+            if (!state.LoadOrder.ContainsKey("Armoury of Tamriel Patch.esp")) {
+                throw new Exception("This patcher requires Armoury of Tamriel - Fixes to be installed! https://www.nexusmods.com/skyrimspecialedition/mods/85810");
+            }
 
             bool verboseLogging = false;
 
@@ -492,10 +498,12 @@ namespace AoTSetTexturesetsFromModel
                 }
                 else
                 {
-                    if (TryGetFileFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif)) {
+                    if (TryGetFileFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif))
+                    {
                         Console.WriteLine("Found mesh in bsa for record: " + weapon.EditorID + ": " + relativepath);
                         nif = foundnif;
-                    } else
+                    }
+                    else
                     {
                         Console.WriteLine("ERROR: Could not find model for record: " + weapon.EditorID + ": " + relativepath);
                         continue;
@@ -511,10 +519,25 @@ namespace AoTSetTexturesetsFromModel
                     var texurepath = nif.GetTexturePathByIndex(shape, 0);
                     if (verboseLogging) Console.WriteLine(texurepath);
 
+                    var index = shapes.IndexOf(shape);
+                    if (Overrides.TryGetValue(weapon.EditorID, out var overrides))
+                    {
+                        if (overrides.TryGetValue(texurepath, out var overridevalue))
+                        {
+                            Console.WriteLine("Found texture override: " + overridevalue + ": " + texurepath);
+                            weapon.Model.AlternateTextures.Add(new AlternateTexture()
+                            {
+                                Name = nif.GetShapeNames()[index],
+                                Index = index,
+                                NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(overridevalue).ToLink()
+                            });
+                            foundreplacement = true;
+                            continue;
+                        }
+                    }
                     if (Textures.TryGetValue(texurepath, out var value))
                     {
                         Console.WriteLine("Found texture replacement: " + value.Replace("Material", material.ToString()) + ": " + texurepath);
-                        var index = shapes.IndexOf(shape);
                         weapon.Model.AlternateTextures.Add(new AlternateTexture()
                         {
                             Name = nif.GetShapeNames()[index],
@@ -527,9 +550,75 @@ namespace AoTSetTexturesetsFromModel
                 if (!foundreplacement) Console.WriteLine("Warning: Could not find texture replacements for: " + weapon.EditorID);
 
                 var firstpersonmodel = weapon.FirstPersonModel.Resolve(state.LinkCache).DeepCopy();
+                if (firstpersonmodel.Model == null) throw new Exception();
+                var firstpersonrelativepath = weapon.Model.File;
+                if (firstpersonrelativepath == relativepath)
+                {
+                    firstpersonmodel.Model = weapon.Model;
+                }
+                else
+                {
+                    var firstpersonmodelPath = state.DataFolderPath + "\\meshes\\" + firstpersonrelativepath;
+                    NifFile firstpersonnif = new();
+                    if (File.Exists(firstpersonmodelPath))
+                    {
+                        Console.WriteLine("Found loose mesh for record: " + firstpersonmodel.EditorID + ": " + firstpersonrelativepath);
+                        firstpersonnif.Load(firstpersonmodelPath);
+                    }
+                    else
+                    {
+                        if (TryGetFileFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif))
+                        {
+                            Console.WriteLine("Found mesh in bsa for record: " + firstpersonmodel.EditorID + ": " + firstpersonrelativepath);
+                            firstpersonnif = foundnif;
+                        }
+                        else
+                        {
+                            Console.WriteLine("ERROR: Could not find model for record: " + firstpersonmodel.EditorID + ": " + firstpersonrelativepath);
+                            continue;
+                        }
+                    }
 
-                firstpersonmodel.Model = weapon.Model;
+                    firstpersonmodel.Model.AlternateTextures = [];
 
+                    bool firstpersonfoundreplacement = false;
+                    var firstpersonshapes = firstpersonnif.GetShapes();
+                    foreach (var shape in firstpersonshapes)
+                    {
+                        var texurepath = firstpersonnif.GetTexturePathByIndex(shape, 0);
+                        if (verboseLogging) Console.WriteLine(texurepath);
+
+                        var index = shapes.IndexOf(shape);
+                        if (Overrides.TryGetValue(weapon.EditorID, out var overrides))
+                        {
+                            if (overrides.TryGetValue(texurepath, out var overridevalue))
+                            {
+                                Console.WriteLine("Found texture override: " + overridevalue + ": " + texurepath);
+                                firstpersonmodel.Model.AlternateTextures.Add(new AlternateTexture()
+                                {
+                                    Name = nif.GetShapeNames()[index],
+                                    Index = index,
+                                    NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(overridevalue).ToLink()
+                                });
+                                foundreplacement = true;
+                                continue;
+                            }
+                        }
+                        if (Textures.TryGetValue(texurepath, out var value))
+                        {
+                            Console.WriteLine("Found texture replacement: " + value.Replace("Material", material.ToString()) + ": " + texurepath);
+                            firstpersonmodel.Model.AlternateTextures.Add(new AlternateTexture()
+                            {
+                                Name = nif.GetShapeNames()[index],
+                                Index = index,
+                                NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(value.Replace("Material", material.ToString())).ToLink()
+                            });
+                            foundreplacement = true;
+                        }
+                    }
+                    if (!firstpersonfoundreplacement) Console.WriteLine("Warning: Could not find texture replacements for: " + firstpersonmodel.EditorID);
+
+                }
                 state.PatchMod.Statics.Set(firstpersonmodel);
                 state.PatchMod.Weapons.Set(weapon);
             }
@@ -547,7 +636,8 @@ namespace AoTSetTexturesetsFromModel
 
                 if (armoraddon.FirstPersonModel != null)
                 {
-                    foreach (var model in armoraddon.FirstPersonModel) {
+                    foreach (var model in armoraddon.FirstPersonModel)
+                    {
                         if (model == null) continue;
 
                         var relativepath = model.File;
@@ -582,8 +672,10 @@ namespace AoTSetTexturesetsFromModel
                             if (verboseLogging) Console.WriteLine(texurepath);
 
                             var index = shapes.IndexOf(shape);
-                            if (Overrides.TryGetValue(armoraddon.EditorID, out var overrides)) {
-                                if (overrides.TryGetValue(texurepath, out var overridevalue)) {
+                            if (Overrides.TryGetValue(armoraddon.EditorID, out var overrides))
+                            {
+                                if (overrides.TryGetValue(texurepath, out var overridevalue))
+                                {
                                     Console.WriteLine("Found texture override: " + overridevalue + ": " + texurepath);
                                     model.AlternateTextures.Add(new AlternateTexture()
                                     {
