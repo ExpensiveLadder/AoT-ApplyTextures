@@ -396,15 +396,15 @@ namespace AoTSetTexturesetsFromModel
             }
             if (editorID.Contains("Mag"))
             {
-                if (editorID.Contains("Flame")) 
+                if (editorID.Contains("Flame"))
                 {
                     material = "MagFlame" + material;
                 }
                 else if (editorID.Contains("Frost") || editorID.Contains("Shard"))
                 {
-                    material = "MagFlame" + material;
-                
-                    } else if (editorID.Contains("Shock") || editorID.Contains("Storm"))
+                    material = "MagFrost" + material;
+                }
+                else if (editorID.Contains("Shock") || editorID.Contains("Storm"))
                 {
                     material = "MagShock" + material;
                 }
