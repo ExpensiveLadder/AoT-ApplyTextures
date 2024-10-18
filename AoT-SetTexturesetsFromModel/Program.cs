@@ -452,6 +452,91 @@ namespace AoTSetTexturesetsFromModel
         }
         */
 
+        public static void PatchModel(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, List<IArchiveReader> archivereaders, IModel model, string editorid, string material)
+        {
+            var relativepath = model.File;
+            var modelPath = state.DataFolderPath + "\\meshes\\" + relativepath;
+            NifFile nif = new();
+            if (File.Exists(modelPath))
+            {
+                Console.WriteLine("Found loose mesh for record: " + editorid + ": " + relativepath);
+                nif.Load(modelPath);
+            }
+            else
+            {
+                if (TryGetFileFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif))
+                {
+                    Console.WriteLine("Found mesh in bsa for record: " + editorid + ": " + relativepath);
+                    nif = foundnif;
+                }
+                else
+                {
+                    Console.WriteLine("ERROR: Could not find model for record: " + editorid + ": " + relativepath);
+                    return;
+                }
+            }
+
+            model.AlternateTextures = [];
+
+            bool foundreplacement = false;
+            var shapes = nif.GetShapes();
+            foreach (var shape in shapes)
+            {
+                var texurepath = nif.GetTexturePathByIndex(shape, 0);
+                //if (verboseLogging) Console.WriteLine(texurepath);
+
+                var index = shapes.IndexOf(shape);
+                if (Overrides.TryGetValue(editorid, out var overrides))
+                {
+                    if (overrides.TryGetValue(texurepath, out var overridevalue))
+                    {
+                        Console.WriteLine("Found texture override: " + overridevalue + ": " + texurepath);
+                        model.AlternateTextures.Add(new AlternateTexture()
+                        {
+                            Name = nif.GetShapeNames()[index],
+                            Index = index,
+                            NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(overridevalue).ToLink()
+                        });
+                        foundreplacement = true;
+                        continue;
+                    }
+                }
+                if (Textures.TryGetValue(texurepath, out var value))
+                {
+                    string textureset = value.Replace("Material", material);
+                    Console.WriteLine("Found texture replacement: " + textureset + ": " + texurepath);
+                    IFormLink<ITextureSetGetter> newtexture;
+                    if (state.LinkCache.TryResolve<ITextureSetGetter>(textureset, out var foundtexture))
+                    {
+                        newtexture = foundtexture.ToLink();
+                    }
+                    else
+                    {
+                        if (material == "ALTEbony")
+                        {
+                            newtexture = state.LinkCache.Resolve<ITextureSetGetter>(value.Replace("Material", "Ebony")).ToLink();
+                        }
+                        else if (material == "ALTDaedric")
+                        {
+                            newtexture = state.LinkCache.Resolve<ITextureSetGetter>(value.Replace("Material", "Daedric")).ToLink();
+                        }
+                        else
+                        {
+                            Console.WriteLine("Warning: Could not find texture replacement: " + textureset);
+                            continue;
+                        }
+                    }
+                    model.AlternateTextures.Add(new AlternateTexture()
+                    {
+                        Name = nif.GetShapeNames()[index],
+                        Index = index,
+                        NewTexture = newtexture
+                    });
+                    foundreplacement = true;
+                }
+            }
+            if (!foundreplacement) Console.WriteLine("Warning: Could not find texture replacements for: " + editorid + ": " + relativepath);
+        }
 
         public static void RunPatch(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
         {
@@ -461,7 +546,7 @@ namespace AoTSetTexturesetsFromModel
                 throw new Exception("This patcher requires Armoury of Tamriel - Fixes to be installed! https://www.nexusmods.com/skyrimspecialedition/mods/85810");
             }
 
-            bool verboseLogging = false;
+            //bool verboseLogging = false;
 
             var archives = Archive.GetApplicableArchivePaths(state.GameRelease, state.DataFolderPath);
             List<IArchiveReader> archivereaders = [];
@@ -488,139 +573,36 @@ namespace AoTSetTexturesetsFromModel
                     continue;
                 }
 
-                var relativepath = weapon.Model.File;
-                var modelPath = state.DataFolderPath + "\\meshes\\" + relativepath;
-                NifFile nif = new();
-                if (File.Exists(modelPath))
-                {
-                    Console.WriteLine("Found loose mesh for record: " + weapon.EditorID + ": " + relativepath);
-                    nif.Load(modelPath);
-                }
-                else
-                {
-                    if (TryGetFileFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif))
-                    {
-                        Console.WriteLine("Found mesh in bsa for record: " + weapon.EditorID + ": " + relativepath);
-                        nif = foundnif;
-                    }
-                    else
-                    {
-                        Console.WriteLine("ERROR: Could not find model for record: " + weapon.EditorID + ": " + relativepath);
-                        continue;
-                    }
-                }
+                PatchModel(state, archivereaders, weapon.Model, weapon.EditorID, material);
 
-                weapon.Model.AlternateTextures = [];
-
-                bool foundreplacement = false;
-                var shapes = nif.GetShapes();
-                foreach (var shape in shapes)
-                {
-                    var texurepath = nif.GetTexturePathByIndex(shape, 0);
-                    if (verboseLogging) Console.WriteLine(texurepath);
-
-                    var index = shapes.IndexOf(shape);
-                    if (Overrides.TryGetValue(weapon.EditorID, out var overrides))
-                    {
-                        if (overrides.TryGetValue(texurepath, out var overridevalue))
-                        {
-                            Console.WriteLine("Found texture override: " + overridevalue + ": " + texurepath);
-                            weapon.Model.AlternateTextures.Add(new AlternateTexture()
-                            {
-                                Name = nif.GetShapeNames()[index],
-                                Index = index,
-                                NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(overridevalue).ToLink()
-                            });
-                            foundreplacement = true;
-                            continue;
-                        }
+                /*
+                bool isITM = true;
+                int i = 0;
+                foreach (var alternatetexture in weapon.Model.AlternateTextures) {
+                    if (newtextures[i].NewTexture != alternatetexture.NewTexture) {
+                        isITM = false;
+                        break;
                     }
-                    if (Textures.TryGetValue(texurepath, out var value))
-                    {
-                        Console.WriteLine("Found texture replacement: " + value.Replace("Material", material.ToString()) + ": " + texurepath);
-                        weapon.Model.AlternateTextures.Add(new AlternateTexture()
-                        {
-                            Name = nif.GetShapeNames()[index],
-                            Index = index,
-                            NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(value.Replace("Material", material.ToString())).ToLink()
-                        });
-                        foundreplacement = true;
-                    }
+                     i++;
                 }
-                if (!foundreplacement) Console.WriteLine("Warning: Could not find texture replacements for: " + weapon.EditorID);
+                */
 
                 var firstpersonmodel = weapon.FirstPersonModel.Resolve(state.LinkCache).DeepCopy();
-                if (firstpersonmodel.Model == null) throw new Exception();
+                if (firstpersonmodel.Model == null || firstpersonmodel.EditorID == null) throw new Exception();
+
                 var firstpersonrelativepath = weapon.Model.File;
-                if (firstpersonrelativepath == relativepath)
+                if (weapon.Model.File == firstpersonmodel.Model.File)
                 {
                     firstpersonmodel.Model = weapon.Model;
                 }
                 else
                 {
-                    var firstpersonmodelPath = state.DataFolderPath + "\\meshes\\" + firstpersonrelativepath;
-                    NifFile firstpersonnif = new();
-                    if (File.Exists(firstpersonmodelPath))
-                    {
-                        Console.WriteLine("Found loose mesh for record: " + firstpersonmodel.EditorID + ": " + firstpersonrelativepath);
-                        firstpersonnif.Load(firstpersonmodelPath);
-                    }
-                    else
-                    {
-                        if (TryGetFileFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif))
-                        {
-                            Console.WriteLine("Found mesh in bsa for record: " + firstpersonmodel.EditorID + ": " + firstpersonrelativepath);
-                            firstpersonnif = foundnif;
-                        }
-                        else
-                        {
-                            Console.WriteLine("ERROR: Could not find model for record: " + firstpersonmodel.EditorID + ": " + firstpersonrelativepath);
-                            continue;
-                        }
-                    }
-
-                    firstpersonmodel.Model.AlternateTextures = [];
-
-                    bool firstpersonfoundreplacement = false;
-                    var firstpersonshapes = firstpersonnif.GetShapes();
-                    foreach (var shape in firstpersonshapes)
-                    {
-                        var texurepath = firstpersonnif.GetTexturePathByIndex(shape, 0);
-                        if (verboseLogging) Console.WriteLine(texurepath);
-
-                        var index = shapes.IndexOf(shape);
-                        if (Overrides.TryGetValue(weapon.EditorID, out var overrides))
-                        {
-                            if (overrides.TryGetValue(texurepath, out var overridevalue))
-                            {
-                                Console.WriteLine("Found texture override: " + overridevalue + ": " + texurepath);
-                                firstpersonmodel.Model.AlternateTextures.Add(new AlternateTexture()
-                                {
-                                    Name = nif.GetShapeNames()[index],
-                                    Index = index,
-                                    NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(overridevalue).ToLink()
-                                });
-                                foundreplacement = true;
-                                continue;
-                            }
-                        }
-                        if (Textures.TryGetValue(texurepath, out var value))
-                        {
-                            Console.WriteLine("Found texture replacement: " + value.Replace("Material", material.ToString()) + ": " + texurepath);
-                            firstpersonmodel.Model.AlternateTextures.Add(new AlternateTexture()
-                            {
-                                Name = nif.GetShapeNames()[index],
-                                Index = index,
-                                NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(value.Replace("Material", material.ToString())).ToLink()
-                            });
-                            foundreplacement = true;
-                        }
-                    }
-                    if (!firstpersonfoundreplacement) Console.WriteLine("Warning: Could not find texture replacements for: " + firstpersonmodel.EditorID);
+                    PatchModel(state, archivereaders, firstpersonmodel.Model, firstpersonmodel.EditorID, material);
 
                 }
                 state.PatchMod.Statics.Set(firstpersonmodel);
                 state.PatchMod.Weapons.Set(weapon);
+                //if (!isITM) state.PatchMod.Weapons.Set(weapon);
             }
 
             foreach (var armoraddonGetter in state.LoadOrder.PriorityOrder.ArmorAddon().WinningOverrides())
@@ -639,180 +621,15 @@ namespace AoTSetTexturesetsFromModel
                     foreach (var model in armoraddon.FirstPersonModel)
                     {
                         if (model == null) continue;
-
-                        var relativepath = model.File;
-                        var modelPath = state.DataFolderPath + "\\meshes\\" + relativepath;
-                        NifFile nif = new();
-                        if (File.Exists(modelPath))
-                        {
-                            Console.WriteLine("Found loose mesh for record: " + armoraddon.EditorID + ": " + relativepath);
-                            nif.Load(modelPath);
-                        }
-                        else
-                        {
-                            if (TryGetFileFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif))
-                            {
-                                Console.WriteLine("Found mesh in bsa for record: " + armoraddon.EditorID + ": " + relativepath);
-                                nif = foundnif;
-                            }
-                            else
-                            {
-                                Console.WriteLine("ERROR: Could not find model for record: " + armoraddon.EditorID + ": " + relativepath);
-                                continue;
-                            }
-                        }
-
-                        model.AlternateTextures = [];
-
-                        bool foundreplacement = false;
-                        var shapes = nif.GetShapes();
-                        foreach (var shape in shapes)
-                        {
-                            var texurepath = nif.GetTexturePathByIndex(shape, 0);
-                            if (verboseLogging) Console.WriteLine(texurepath);
-
-                            var index = shapes.IndexOf(shape);
-                            if (Overrides.TryGetValue(armoraddon.EditorID, out var overrides))
-                            {
-                                if (overrides.TryGetValue(texurepath, out var overridevalue))
-                                {
-                                    Console.WriteLine("Found texture override: " + overridevalue + ": " + texurepath);
-                                    model.AlternateTextures.Add(new AlternateTexture()
-                                    {
-                                        Name = nif.GetShapeNames()[index],
-                                        Index = index,
-                                        NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(overridevalue).ToLink()
-                                    });
-                                    foundreplacement = true;
-                                    continue;
-                                }
-                            }
-                            if (Textures.TryGetValue(texurepath, out var value))
-                            {
-                                string textureset = value.Replace("Material", material.ToString());
-                                Console.WriteLine("Found texture replacement: " + textureset + ": " + texurepath);
-                                IFormLink<ITextureSetGetter> newtexture;
-                                if (state.LinkCache.TryResolve<ITextureSetGetter>(textureset, out var foundtexture))
-                                {
-                                    newtexture = foundtexture.ToLink();
-                                }
-                                else
-                                {
-                                    if (material == "ALTEbony")
-                                    {
-                                        newtexture = state.LinkCache.Resolve<ITextureSetGetter>(value.Replace("Material", "Ebony")).ToLink();
-                                    }
-                                    else if (material == "ALTDaedric")
-                                    {
-                                        newtexture = state.LinkCache.Resolve<ITextureSetGetter>(value.Replace("Material", "Daedric")).ToLink();
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine("Warning: Could not find texture replacement: " + textureset);
-                                        continue;
-                                    }
-                                }
-                                model.AlternateTextures.Add(new AlternateTexture()
-                                {
-                                    Name = nif.GetShapeNames()[index],
-                                    Index = index,
-                                    NewTexture = newtexture
-                                });
-                                foundreplacement = true;
-                            }
-                        }
-                        if (!foundreplacement) Console.WriteLine("Warning: Could not find texture replacements for: " + armoraddon.EditorID + ": " + relativepath);
+                        PatchModel(state, archivereaders, model, armoraddon.EditorID, material);
                     }
                 }
-
                 if (armoraddon.WorldModel != null)
                 {
                     foreach (var model in armoraddon.WorldModel)
                     {
                         if (model == null) continue;
-
-                        var relativepath = model.File;
-                        var modelPath = state.DataFolderPath + "\\meshes\\" + relativepath;
-                        NifFile nif = new();
-                        if (File.Exists(modelPath))
-                        {
-                            Console.WriteLine("Found loose mesh for record: " + armoraddon.EditorID + ": " + relativepath);
-                            nif.Load(modelPath);
-                        }
-                        else
-                        {
-                            if (TryGetFileFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif))
-                            {
-                                Console.WriteLine("Found mesh in bsa for record: " + armoraddon.EditorID + ": " + relativepath);
-                                nif = foundnif;
-                            }
-                            else
-                            {
-                                Console.WriteLine("ERROR: Could not find model for record: " + armoraddon.EditorID + ": " + relativepath);
-                                continue;
-                            }
-                        }
-
-                        model.AlternateTextures = [];
-
-                        bool foundreplacement = false;
-                        var shapes = nif.GetShapes();
-                        foreach (var shape in shapes)
-                        {
-                            var texurepath = nif.GetTexturePathByIndex(shape, 0);
-                            if (verboseLogging) Console.WriteLine(texurepath);
-
-                            var index = shapes.IndexOf(shape);
-                            if (Overrides.TryGetValue(armoraddon.EditorID, out var overrides))
-                            {
-                                if (overrides.TryGetValue(texurepath, out var overridevalue))
-                                {
-                                    Console.WriteLine("Found texture override: " + overridevalue + ": " + texurepath);
-                                    model.AlternateTextures.Add(new AlternateTexture()
-                                    {
-                                        Name = nif.GetShapeNames()[index],
-                                        Index = index,
-                                        NewTexture = state.LinkCache.Resolve<ITextureSetGetter>(overridevalue).ToLink()
-                                    });
-                                    foundreplacement = true;
-                                    continue;
-                                }
-                            }
-                            if (Textures.TryGetValue(texurepath, out var value))
-                            {
-                                string textureset = value.Replace("Material", material.ToString());
-                                Console.WriteLine("Found texture replacement: " + textureset + ": " + texurepath);
-                                IFormLink<ITextureSetGetter> newtexture;
-                                if (state.LinkCache.TryResolve<ITextureSetGetter>(textureset, out var foundtexture))
-                                {
-                                    newtexture = foundtexture.ToLink();
-                                }
-                                else
-                                {
-                                    if (material == "ALTEbony")
-                                    {
-                                        newtexture = state.LinkCache.Resolve<ITextureSetGetter>(value.Replace("Material", "Ebony")).ToLink();
-                                    }
-                                    else if (material == "ALTDaedric")
-                                    {
-                                        newtexture = state.LinkCache.Resolve<ITextureSetGetter>(value.Replace("Material", "Daedric")).ToLink();
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine("Warning: Could not find texture replacement: " + textureset);
-                                        continue;
-                                    }
-                                }
-                                model.AlternateTextures.Add(new AlternateTexture()
-                                {
-                                    Name = nif.GetShapeNames()[index],
-                                    Index = index,
-                                    NewTexture = newtexture
-                                });
-                                foundreplacement = true;
-                            }
-                        }
-                        if (!foundreplacement) Console.WriteLine("Warning: Could not find texture replacements for: " + armoraddon.EditorID + ": " + relativepath);
+                        PatchModel(state, archivereaders, model, armoraddon.EditorID, material);
                     }
                 }
 
