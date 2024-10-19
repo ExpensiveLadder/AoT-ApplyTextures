@@ -343,7 +343,6 @@ namespace AoTSetTexturesetsFromModel
             {"textures\\dlc01\\clothes\\vampire\\robesf_alt_v3.dds", "300DLC1ArmorMaterialVampireCuirassAlternateFTS"},
         };
 
-
         public static bool GetMaterial(string editorID, out string material)
         {
 
@@ -452,7 +451,7 @@ namespace AoTSetTexturesetsFromModel
         }
         */
 
-        public static void PatchModel(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, List<IArchiveReader> archivereaders, IModel model, string editorid, string material)
+        public static bool PatchModel(IPatcherState<ISkyrimMod, ISkyrimModGetter> state, List<IArchiveReader> archivereaders, IModel model, string editorid, string material)
         {
             var relativepath = model.File;
             var modelPath = state.DataFolderPath + "\\meshes\\" + relativepath;
@@ -472,11 +471,11 @@ namespace AoTSetTexturesetsFromModel
                 else
                 {
                     Console.WriteLine("ERROR: Could not find model for record: " + editorid + ": " + relativepath);
-                    return;
+                    return false;
                 }
             }
 
-            model.AlternateTextures = [];
+            ExtendedList<AlternateTexture> newtextures = [];
 
             bool foundreplacement = false;
             var shapes = nif.GetShapes();
@@ -491,7 +490,7 @@ namespace AoTSetTexturesetsFromModel
                     if (overrides.TryGetValue(texurepath, out var overridevalue))
                     {
                         Console.WriteLine("Found texture override: " + overridevalue + ": " + texurepath);
-                        model.AlternateTextures.Add(new AlternateTexture()
+                        newtextures.Add(new AlternateTexture()
                         {
                             Name = nif.GetShapeNames()[index],
                             Index = index,
@@ -526,7 +525,7 @@ namespace AoTSetTexturesetsFromModel
                             continue;
                         }
                     }
-                    model.AlternateTextures.Add(new AlternateTexture()
+                    newtextures.Add(new AlternateTexture()
                     {
                         Name = nif.GetShapeNames()[index],
                         Index = index,
@@ -536,13 +535,43 @@ namespace AoTSetTexturesetsFromModel
                 }
             }
             if (!foundreplacement) Console.WriteLine("Warning: Could not find texture replacements for: " + editorid + ": " + relativepath);
+
+            /*
+            if (model.AlternateTextures == null)
+            {
+                if (newtextures.Count > 0)
+                {
+                    model.AlternateTextures = newtextures;
+                    return true;
+                }
+            }
+            else
+            {
+                if (model.AlternateTextures.Count != newtextures.Count) return true;
+                int i = 0;
+                foreach (var alternatetexture in model.AlternateTextures)
+                {
+                    if (alternatetexture.NewTexture !=  newtextures[i])
+                    {
+                        model.AlternateTextures = newtextures;
+                        return true;
+                    }
+                    i++;
+                }
+            }
+            model.AlternateTextures = newtextures;
+            return false;
+            */
+            model.AlternateTextures = newtextures;
+            return true;
         }
 
         public static void RunPatch(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
         {
             //Your code here!
 
-            if (!state.LoadOrder.ContainsKey("Armoury of Tamriel Patch.esp")) {
+            if (!state.LoadOrder.ContainsKey("Armoury of Tamriel Patch.esp"))
+            {
                 throw new Exception("This patcher requires Armoury of Tamriel - Fixes to be installed! https://www.nexusmods.com/skyrimspecialedition/mods/85810");
             }
 
@@ -573,36 +602,28 @@ namespace AoTSetTexturesetsFromModel
                     continue;
                 }
 
-                PatchModel(state, archivereaders, weapon.Model, weapon.EditorID, material);
-
-                /*
-                bool isITM = true;
-                int i = 0;
-                foreach (var alternatetexture in weapon.Model.AlternateTextures) {
-                    if (newtextures[i].NewTexture != alternatetexture.NewTexture) {
-                        isITM = false;
-                        break;
-                    }
-                     i++;
-                }
-                */
+                bool ismodelaltered = false;
+                if (PatchModel(state, archivereaders, weapon.Model, weapon.EditorID, material)) ismodelaltered = true; ;
 
                 var firstpersonmodel = weapon.FirstPersonModel.Resolve(state.LinkCache).DeepCopy();
                 if (firstpersonmodel.Model == null || firstpersonmodel.EditorID == null) throw new Exception();
 
-                var firstpersonrelativepath = weapon.Model.File;
                 if (weapon.Model.File == firstpersonmodel.Model.File)
                 {
-                    firstpersonmodel.Model = weapon.Model;
+                    if (ismodelaltered)
+                    {
+                        firstpersonmodel.Model = weapon.Model;
+                        state.PatchMod.Statics.Set(firstpersonmodel);
+                    }
                 }
                 else
                 {
-                    PatchModel(state, archivereaders, firstpersonmodel.Model, firstpersonmodel.EditorID, material);
-
+                    if (PatchModel(state, archivereaders, firstpersonmodel.Model, firstpersonmodel.EditorID, material))
+                    {
+                        state.PatchMod.Statics.Set(firstpersonmodel);
+                    }
                 }
-                state.PatchMod.Statics.Set(firstpersonmodel);
-                state.PatchMod.Weapons.Set(weapon);
-                //if (!isITM) state.PatchMod.Weapons.Set(weapon);
+                if (ismodelaltered) state.PatchMod.Weapons.Set(weapon);
             }
 
             foreach (var armoraddonGetter in state.LoadOrder.PriorityOrder.ArmorAddon().WinningOverrides())
@@ -612,16 +633,19 @@ namespace AoTSetTexturesetsFromModel
 
                 if (!GetMaterial(armoraddon.EditorID, out var material))
                 {
-                    Console.WriteLine("Warning: Could not find material for weapon: " + armoraddon.EditorID);
+                    Console.WriteLine("Warning: Could not find material for armor: " + armoraddon.EditorID);
                     continue;
                 }
 
+                bool ismodelaltered = false;
                 if (armoraddon.FirstPersonModel != null)
                 {
                     foreach (var model in armoraddon.FirstPersonModel)
                     {
                         if (model == null) continue;
-                        PatchModel(state, archivereaders, model, armoraddon.EditorID, material);
+                        if (PatchModel(state, archivereaders, model, armoraddon.EditorID, material)) {
+                            ismodelaltered = true;
+                        }
                     }
                 }
                 if (armoraddon.WorldModel != null)
@@ -629,11 +653,13 @@ namespace AoTSetTexturesetsFromModel
                     foreach (var model in armoraddon.WorldModel)
                     {
                         if (model == null) continue;
-                        PatchModel(state, archivereaders, model, armoraddon.EditorID, material);
+                        if (PatchModel(state, archivereaders, model, armoraddon.EditorID, material))
+                        {
+                            ismodelaltered = true;
+                        }
                     }
                 }
-
-                state.PatchMod.ArmorAddons.Set(armoraddon);
+                if (ismodelaltered) state.PatchMod.ArmorAddons.Set(armoraddon);
             }
         }
     }
