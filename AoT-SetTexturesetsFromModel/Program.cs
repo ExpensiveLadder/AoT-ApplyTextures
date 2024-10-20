@@ -7,6 +7,7 @@ using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Archives;
 using Noggog;
 using System;
+using DynamicData;
 
 namespace AoTSetTexturesetsFromModel
 {
@@ -261,11 +262,11 @@ namespace AoTSetTexturesetsFromModel
             {"textures\\armor\\orcish\\orc_armor_female_body_d.dds", "300ArmorMaterialOrcishCuirassFTS"},
             {"textures\\armor\\orcish\\orc_armor_female_boot_d.dds", "300ArmorMaterialOrcishBootsFTS"},
             {"textures\\armor\\orcish\\orc_armor_female_glove_d.dds", "300ArmorMaterialOrcishGauntletsFTS"},
-            {"textures\\armor\\orcish\\orc_armor_female_helmet_d.dds", "300ArmorMaterialOrcishCuirassFTS"},
+            {"textures\\armor\\orcish\\orc_armor_female_helmet_d.dds", "300ArmorMaterialOrcishHelmetFTS"},
             {"textures\\armor\\orcish\\orc_armor_male_body_d.dds", "300ArmorMaterialOrcishCuirassMTS"},
             {"textures\\armor\\orcish\\orc_armor_male_boot_d.dds", "300ArmorMaterialOrcishBootsMTS"},
             {"textures\\armor\\orcish\\orc_armor_male_glove_d.dds", "300ArmorMaterialOrcishGauntletsMTS"},
-            {"textures\\armor\\orcish\\orc_armor_male_helmet_d.dds", "300ArmorMaterialOrcishCuirassMTS"},
+            {"textures\\armor\\orcish\\orc_armor_male_helmet_d.dds", "300ArmorMaterialOrcishHelmetMTS"},
             {"textures\\armor\\orcish\\orcshield.dds", "300ArmorMaterialOrcishShieldTS"},
             {"textures\\armor\\sonsoftalos\\sonsoftalosbodyf.dds", "300ArmorMaterialStormCloakBearCuirassFTS"},
             {"textures\\armor\\sonsoftalos\\sonsoftalosbodym.dds", "300ArmorMaterialStormCloakBearCuirassMTS"},
@@ -390,6 +391,10 @@ namespace AoTSetTexturesetsFromModel
             {
                 material = "Dwarven";
             }
+            else if (editorID.Contains("Dwemer"))
+            {
+                material = "Dwarven";
+            }
             else
             {
                 material = "";
@@ -413,11 +418,18 @@ namespace AoTSetTexturesetsFromModel
             return true;
         }
 
-        public static bool TryGetFileFromArchive(List<IArchiveReader> archives, string path, out NifFile niffile)
+        public static bool TryGetNifFromArchive(List<IArchiveReader> archives, string path, out NifFile niffile)
         {
             niffile = new();
             foreach (var archive in archives)
             {
+                /*
+                if (archive.TryGetFolder(, out var folder)) {
+
+                } else {
+
+                }
+                */
                 foreach (var file in archive.Files)
                 {
                     if (file.Path.Equals(path, StringComparison.OrdinalIgnoreCase))
@@ -463,7 +475,7 @@ namespace AoTSetTexturesetsFromModel
             }
             else
             {
-                if (TryGetFileFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif))
+                if (TryGetNifFromArchive(archivereaders, "meshes\\" + relativepath, out var foundnif))
                 {
                     Console.WriteLine("Found mesh in bsa for record: " + editorid + ": " + relativepath);
                     nif = foundnif;
@@ -536,34 +548,47 @@ namespace AoTSetTexturesetsFromModel
             }
             if (!foundreplacement) Console.WriteLine("Warning: Could not find texture replacements for: " + editorid + ": " + relativepath);
 
-            /*
             if (model.AlternateTextures == null)
             {
                 if (newtextures.Count > 0)
                 {
+                    //Console.WriteLine("original texturesets are null for: " + editorid);
+                    Console.WriteLine("Patched record: " + editorid);
                     model.AlternateTextures = newtextures;
                     return true;
                 }
             }
             else
             {
-                if (model.AlternateTextures.Count != newtextures.Count) return true;
-                int i = 0;
+                if (model.AlternateTextures.Count != newtextures.Count)
+                {
+                    //Console.WriteLine("original texturesets count is different from new texturesets for: " + editorid);
+                    Console.WriteLine("Patched record: " + editorid);
+                    model.AlternateTextures = newtextures;
+                    return true;
+                }
                 foreach (var alternatetexture in model.AlternateTextures)
                 {
-                    if (alternatetexture.NewTexture !=  newtextures[i])
+                    var newtexture = newtextures.Find(a => a.Index == alternatetexture.Index);
+                    if (newtexture == null)
                     {
+                        //Console.WriteLine("new texture is null for: " + editorid);
+                        Console.WriteLine("Patched record: " + editorid);
                         model.AlternateTextures = newtextures;
                         return true;
+                    } else {
+                        if (newtexture.NewTexture.FormKey != alternatetexture.NewTexture.FormKey)
+                        {
+                            //Console.WriteLine("new texture does not match original texture for: " + editorid);
+                            Console.WriteLine("Patched record: " + editorid);
+                            model.AlternateTextures = newtextures;
+                            return true;
+                        }
                     }
-                    i++;
                 }
             }
-            model.AlternateTextures = newtextures;
+            Console.WriteLine("Skipping ITM for record: " + editorid);
             return false;
-            */
-            model.AlternateTextures = newtextures;
-            return true;
         }
 
         public static void RunPatch(IPatcherState<ISkyrimMod, ISkyrimModGetter> state)
@@ -577,7 +602,13 @@ namespace AoTSetTexturesetsFromModel
 
             //bool verboseLogging = false;
 
-            var archives = Archive.GetApplicableArchivePaths(state.GameRelease, state.DataFolderPath);
+            var archives = Archive.GetApplicableArchivePaths(state.GameRelease, state.DataFolderPath).ToList();
+            archives.RemoveAll(a => a.NameWithoutExtension.Contains(" - Textures", StringComparison.OrdinalIgnoreCase));
+            archives.RemoveAll(a => a.NameWithoutExtension.Contains(" - Shaders", StringComparison.OrdinalIgnoreCase));
+            archives.RemoveAll(a => a.NameWithoutExtension.Contains(" - Interface", StringComparison.OrdinalIgnoreCase));
+            archives.RemoveAll(a => a.NameWithoutExtension.Contains(" - Animations", StringComparison.OrdinalIgnoreCase));
+            archives.RemoveAll(a => a.NameWithoutExtension.Contains(" - Sounds", StringComparison.OrdinalIgnoreCase));
+            archives.RemoveAll(a => a.NameWithoutExtension.Contains(" - Voices", StringComparison.OrdinalIgnoreCase));
             List<IArchiveReader> archivereaders = [];
             foreach (var mod in state.LoadOrder.Reverse())
             {
