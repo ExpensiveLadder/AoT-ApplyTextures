@@ -14,6 +14,8 @@ namespace AoTSetTexturesetsFromModel
     public class Settings
     {
         public bool readBSAs = false;
+        public bool patch300 = true;
+        public bool patch400 = true;
     }
 
     public class Program
@@ -640,7 +642,19 @@ namespace AoTSetTexturesetsFromModel
             foreach (var weaponGetter in state.LoadOrder.PriorityOrder.Weapon().WinningOverrides())
             {
                 var weapon = weaponGetter.DeepCopy();
-                if (weapon.EditorID == null || weapon.Model == null || !weapon.Template.IsNull || weapon.EditorID.StartsWith("3001") || !(weapon.EditorID.StartsWith("300") || weapon.EditorID.StartsWith("400"))) continue;
+                if (weapon.EditorID == null || weapon.Model == null || !weapon.Template.IsNull || weapon.EditorID.StartsWith("3001")) continue;
+                if (weapon.EditorID.StartsWith("300"))
+                {
+                    if (Settings.Value.patch300 == false) continue;
+                }
+                else if (weapon.EditorID.StartsWith("400"))
+                {
+                    if (Settings.Value.patch400 == false) continue;
+                }
+                else
+                {
+                    continue;
+                }
 
                 if (!GetMaterial(weapon.EditorID, out var material))
                 {
@@ -675,7 +689,22 @@ namespace AoTSetTexturesetsFromModel
             foreach (var armoraddonGetter in state.LoadOrder.PriorityOrder.ArmorAddon().WinningOverrides())
             {
                 var armoraddon = armoraddonGetter.DeepCopy();
-                if (armoraddon.EditorID == null || armoraddon.EditorID.StartsWith("3001") || !(armoraddon.EditorID.StartsWith("300") || armoraddon.EditorID.StartsWith("400"))) continue;
+                if (armoraddon.EditorID == null || armoraddon.EditorID.StartsWith("3001")) continue;
+                if (armoraddon.EditorID.StartsWith("300"))
+                {
+                    if (Settings.Value.patch300 == false) continue;
+                }
+                else if (armoraddon.EditorID.StartsWith("400"))
+                {
+                    if (Settings.Value.patch400 == false) continue;
+                }
+                else
+                {
+                    continue;
+                }
+
+                if (armoraddon.EditorID.StartsWith("300") && Settings.Value.patch300 == false) continue;
+                if (armoraddon.EditorID.StartsWith("400") && Settings.Value.patch400 == false) continue;
 
                 if (!GetMaterial(armoraddon.EditorID, out var material))
                 {
